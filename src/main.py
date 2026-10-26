@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 from fetch import Fetcher
+from image_files import download_images
 from images import parse_manga_images
 
 BASE_URL = "https://onepiece.fandom.com"
@@ -15,6 +16,8 @@ PAGES_DIR = DATA_DIR / "pages"
 CHARACTERS_HTML = DATA_DIR / "List_of_Canon_Characters.html"
 CHARACTERS_JSON = DATA_DIR / "characters.json"
 IMAGES_JSON = DATA_DIR / "characters_with_images.json"
+RAW_IMAGES_DIR = DATA_DIR / "raw_images"
+IMAGES_DIR = DATA_DIR / "images"
 
 
 def parse_characters(html: str) -> list[dict[str, str]]:
@@ -47,6 +50,7 @@ def main() -> None:
   args = parser.parse_args()
 
   fetcher = Fetcher()
+  image_fetcher = Fetcher(delay=(0.3, 0.8))
 
   html = fetcher.get_html(f"{BASE_URL}/wiki/List_of_Canon_Characters", CHARACTERS_HTML)
   characters = parse_characters(html)
@@ -61,6 +65,7 @@ def main() -> None:
 
   results = []
   failed = []
+  failed_images = []
   for i, character in enumerate(characters, start=1):
     print(f"[{i}/{len(characters)}] {character['name']}")
     try:
@@ -69,7 +74,18 @@ def main() -> None:
       print(f"  ERROR: {e}")
       failed.append(character["name"])
       continue
-    results.append({**character, "images": parse_manga_images(page)})
+
+    images = parse_manga_images(page)
+    local_images = download_images(
+      character["link"], images, image_fetcher, RAW_IMAGES_DIR, IMAGES_DIR
+    )
+    if images and local_images:
+      failed_images += [
+        f"{character['name']}:{key}"
+        for key, url in images.items()
+        if url and not local_images[key]
+      ]
+    results.append({**character, "images": images, "local_images": local_images})
 
   IMAGES_JSON.write_text(
     json.dumps(results, ensure_ascii=False, indent=2),
@@ -79,7 +95,8 @@ def main() -> None:
   without_image = sum(1 for r in results if r["images"] is None)
   print(f"\nGuardados {len(results)} en {IMAGES_JSON.name}")
   print(f"Sin imagen de manga: {without_image}")
-  print(f"Fallidos: {len(failed)} {failed}")
+  print(f"Páginas fallidas: {len(failed)} {failed}")
+  print(f"Imágenes fallidas: {len(failed_images)} {failed_images}")
 
 
 if __name__ == "__main__":

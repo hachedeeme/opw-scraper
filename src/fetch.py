@@ -21,25 +21,38 @@ class Fetcher:
     if cache.exists():
       return cache.read_text(encoding="utf-8")
 
-    html = self._download(url)
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(html, encoding="utf-8")
-    # Pausa solo cuando efectivamente le pegamos a la wiki
-    time.sleep(random.uniform(*self.delay))
+    html = self._download(url).text
+    self._write(cache, html.encode("utf-8"))
     return html
 
-  def _download(self, url: str) -> str:
+  def get_bytes(self, url: str, cache: Path) -> bytes:
+    if cache.exists():
+      return cache.read_bytes()
+
+    data = self._download(url).content
+    self._write(cache, data)
+    return data
+
+  def _write(self, path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".part")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    # Pausa solo cuando efectivamente le pegamos a la red
+    time.sleep(random.uniform(*self.delay))
+
+  def _download(self, url: str) -> requests.Response:
     for attempt in range(self.max_retries + 1):
       response = self.session.get(url, timeout=30)
       if response.status_code not in RETRY_STATUS:
         response.raise_for_status()
-        return response.text
+        return response
       if attempt < self.max_retries:
         wait = self._wait_time(response, attempt)
         print(f"  {response.status_code} en {url}, reintento en {wait:.0f}s")
         time.sleep(wait)
     response.raise_for_status()
-    return response.text
+    return response
 
   @staticmethod
   def _wait_time(response: requests.Response, attempt: int) -> float:
